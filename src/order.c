@@ -8,6 +8,11 @@ void subscripts_for_offset_cmajor(int *D, int nd, int idx, int **sbs);
 int offset_for_subscripts_rmajor(int *D, int nd, int *sbs);
 int offset_for_subscripts_cmajor(int *D, int nd, int *sbs);
 
+void subscripts_for_offset_rmajor2(int *D, int *Dcpr, int nd, int idx, int **sbs);
+void subscripts_for_offset_cmajor2(int *D, int *Dcpl, int nd, int idx, int **sbs);
+int offset_for_subscripts_rmajor2(int *D, int *Dcpr, int nd, int *sbs);
+int offset_for_subscripts_cmajor2(int *D, int *Dcpl, int nd, int *sbs);
+
 int main(int argc, char **argv)  {
 
   int nd = 4;
@@ -17,6 +22,28 @@ int main(int argc, char **argv)  {
   D[2] = 2;
   D[3] = 4;
 
+  int *Dcpr = (int *)malloc(nd*sizeof(int));
+  Dcpr[nd-1] = 1;
+  for(int i=nd-2;i>=0;i--)
+    Dcpr[i] = Dcpr[i+1]*D[i+1];
+
+  int *Dcpl = (int *)malloc(nd*sizeof(int));
+  Dcpl[0] = 1;
+  for(int i=1;i<nd;i++)
+    Dcpl[i] = Dcpl[i-1]*D[i-1];
+
+  printf("D    = [");
+  for(int i=0;i<nd;i++)  
+    printf("%4d ", D[i]);
+  printf("]\nDcpr = [");
+  for(int i=0;i<nd;i++)  
+    printf("%4d ", Dcpr[i]);
+  printf("]\nDcpl = [");
+  for(int i=0;i<nd;i++)  
+    printf("%4d ", Dcpl[i]);
+  printf("]\n");
+  
+  // number of linear indices is product of all elements of D
   int nidx = 1;
   for(int i=0;i<nd;i++)
     nidx *= D[i];
@@ -34,31 +61,59 @@ int main(int argc, char **argv)  {
   printf("Row-major order:\n");
   gen_all_subscripts_rmajor(D, nd, &S, nidx);
   for(int i=0;i<nidx;i++)  {
-    subscripts_for_offset_rmajor(D, nd, i, &sbs);
-    printf("%4d:  [", i);
-    for(int j=0;j<nd;j++)  {   
-      printf("%4d ", S[i][j]);
+
+    // check subscript computation
+    subscripts_for_offset_rmajor2(D, Dcpr, nd, i, &sbs);
+    int ok = 1;
+    for(int j=0;j<nd;j++)  {
+      if (sbs[j] != S[i][j])
+        ok = 0;
     }
-    printf("]  [");
-    for(int j=0;j<nd;j++)  {   
-      printf("%4d ", sbs[j]);
+  
+    // check index computation
+    int jdx = offset_for_subscripts_rmajor2(D, Dcpr, nd, sbs);
+    if (jdx != i)
+      ok = 0;
+
+    if (!ok)  {
+      printf("%4d:  [", i);
+      for(int j=0;j<nd;j++)  {   
+        printf("%4d ", S[i][j]);
+      }
+      printf("]  [");
+      for(int j=0;j<nd;j++)  {   
+        printf("%4d ", sbs[j]);
+      }
+      printf("]  %4d\n", jdx);
     }
-    printf("]  %4d\n", offset_for_subscripts_rmajor(D, nd, sbs));
   }
 
   printf("\nColumn-major order:\n");
   gen_all_subscripts_cmajor(D, nd, &S, nidx);
   for(int i=0;i<nidx;i++)  {
-    subscripts_for_offset_cmajor(D, nd, i, &sbs);
-    printf("%4d:  [", i);
-    for(int j=0;j<nd;j++)  {   
-      printf("%4d ", S[i][j]);
+    int ok = 1;
+    subscripts_for_offset_cmajor2(D, Dcpl, nd, i, &sbs);
+    for(int j=0;j<nd;j++)  {
+      if (sbs[j] != S[i][j])
+        ok = 0;
     }
-    printf("]  [");
-    for(int j=0;j<nd;j++)  {   
-      printf("%4d ", sbs[j]);
+
+    // check index computation
+    int jdx = offset_for_subscripts_cmajor2(D, Dcpl, nd, sbs);
+    if (jdx != i)
+      ok = 0;
+
+    if (!ok)  {
+      printf("%4d:  [", i);
+      for(int j=0;j<nd;j++)  {   
+        printf("%4d ", S[i][j]);
+      }
+      printf("]  [");
+      for(int j=0;j<nd;j++)  {   
+        printf("%4d ", sbs[j]);
+      }
+      printf("] %4d\n", jdx);
     }
-    printf("] %4d\n", offset_for_subscripts_cmajor(D, nd, sbs));
   }
 
   // clean up
@@ -142,6 +197,22 @@ void subscripts_for_offset_rmajor(int *D, int nd, int idx, int **subs)  {
   }
 }
 
+// Performance enhancement: save integer divisions
+// Precompute: Dcpr[k] := product of D[k+1]*D[k+2]...*D[nd-1]
+// (cumulative product to the right)
+void subscripts_for_offset_rmajor2(int *D, int *Dcpr, int nd, int idx, int **subs)  {
+  for(int j=0;j<nd;j++)  {
+    int s;
+    if (j == 0)  
+      s = idx / Dcpr[0];
+    else if (j == nd-1)  
+      s = idx % D[nd-1]; 
+    else  
+      s = (idx / Dcpr[j]) % D[j];
+    (*subs)[j] = s;
+  }
+}
+
 
 void subscripts_for_offset_cmajor(int *D, int nd, int idx, int **subs)  {
   for(int j=0;j<nd;j++)  {
@@ -163,6 +234,22 @@ void subscripts_for_offset_cmajor(int *D, int nd, int idx, int **subs)  {
   }
 }
 
+// Performance enhancement: save integer divisions
+// Precompute: Dcpl[k] := product of D[0]*D[1]...*D[k-1]
+// (cumulative product to the left)
+void subscripts_for_offset_cmajor2(int *D, int *Dcpl, int nd, int idx, int **subs)  {
+  for(int j=0;j<nd;j++)  {
+    int s;
+    if (j == 0)
+      s = idx % D[0];
+    else if (j == nd-1)  
+      s = idx / Dcpl[nd-1];
+    else  
+      s = (idx / Dcpl[j]) % D[j];
+    (*subs)[j] = s;
+  }
+}
+
 
 int offset_for_subscripts_rmajor(int *D, int nd, int *sbs)  {
   int idx = 0;
@@ -175,14 +262,19 @@ int offset_for_subscripts_rmajor(int *D, int nd, int *sbs)  {
   return idx;
 }
 
-int offset_for_subscripts_cmajor(int *D, int nd, int *sbs)  {
+int offset_for_subscripts_rmajor2(int *D, int *Dcpr, int nd, int *sbs)  {
   int idx = 0;
-  for(int j=0;j<nd;j++)  {
-    int p = 1;
-    for(int i=0;i<j;i++)
-      p = p * D[i];
-    idx = idx + p*sbs[j];
-  }
+  for(int j=0;j<nd;j++)  
+    idx = idx + Dcpr[j]*sbs[j];
+  return idx;
+}
+
+
+
+int offset_for_subscripts_cmajor2(int *D, int *Dcpl, int nd, int *sbs)  {
+  int idx = 0;
+  for(int j=0;j<nd;j++)  
+    idx = idx + Dcpl[j]*sbs[j];
   return idx;
 }
 
